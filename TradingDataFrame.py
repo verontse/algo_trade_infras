@@ -12,17 +12,27 @@ class TradingDataFrame():
         if len(price_cols) == 0:
             self.price_cols = [price for price in price_criteria_pair.keys()]
 
-        # Convert price cols to numbers & add pct_change
-        for col in price_cols:
-            df[col] = pd.to_numeric(df[col])
-            df[col+'_pct_change'] = df[col].pct_change()
-
         # Set time col to index
         if time_unit != None:
             df[time_col] = pd.to_datetime(df[time_col], unit=time_unit)
         df.set_index(time_col, inplace=True)
 
+        # Convert price cols to numbers
+        for col in price_cols:
+            df[col] = pd.to_numeric(df[col])
+        
+        # make log returns, pct_change and log_pct_change df
+        returns = df[price_cols].pct_change()
+
+        df_plusone = df.copy() + 1
+        log_data = np.log(df_plusone)
+        log_returns = log_data[price_cols].pct_change()
+
         # Drop first row
-        df = df.iloc[1:,:]
+        returns = returns.iloc[1:,:].copy()
+        log_returns = log_returns.iloc[1:,:].copy()
 
         self.data = df
+        self.log_data = log_data
+        self.returns = returns
+        self.log_returns = log_returns
