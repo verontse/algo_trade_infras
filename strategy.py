@@ -14,14 +14,11 @@ class Strategy():
         self.price_position_pair = None
         self.df = None
 
-    def _calculate_daily_pl(self, row):
-        pl = 0
-        for price, positions in self.price_position_pair.items():
-            pl += row[price+'_pct_change_next_day'] * (row[positions[0]] - row[positions[1]])    # Long -> *1, short -> *-1
-        return pl
-    
-    def _calculate_maxdd(self, tdf, window):
-        return (self.df['cum p&l'].rolling(window, min_periods=1).max() - self.df['cum p&l'].rolling(window, min_periods=1).min()).max()
+    def _calculate_maxdd(self, df):
+        Roll_Max = df['daily p&l'].cummax()
+        Daily_Drawdown = df['daily p&l'] - Roll_Max
+        Max_Daily_Drawdown = Daily_Drawdown.cummin()
+        return min(Max_Daily_Drawdown)
 
     def set_strategy(self, long_entry=None, long_exit=None, short_entry=None, short_exit=None):
         self.long_entry_sign, self.long_entry_threshold = long_entry
@@ -31,64 +28,79 @@ class Strategy():
 
     def apply_strategy(self, tdf):
         
-        self.df = tdf.data.copy()
-        self.price_position_pair = {}
-        for price, criteria in tdf.price_criteria_pair.items():
-            if self.long_entry_sign == '>':
-                self.df.loc[self.df[criteria] > self.long_entry_threshold, price+'_Position_long'] = 1
-            elif self.long_entry_sign == '<':
-                self.df.loc[self.df[criteria] < self.long_entry_threshold, price+'_Position_long'] = 1
-            else:
-                print('error in long entry sign')
+        # Position long df
+        if self.long_entry_sign == '>':
+            df_long_entry = (tdf.criteria_df > self.long_entry_threshold) + 0
 
-            if self.long_exit_sign == '>':
-                self.df.loc[self.df[criteria] > self.long_exit_threshold, price+'_Position_long'] = 0
-            elif self.long_exit_sign == '<':
-                self.df.loc[self.df[criteria] < self.long_exit_threshold, price+'_Position_long'] = 0
-            else:
-                print('error in long exit sign')
-            
-            if self.short_entry_sign == '>':
-                self.df.loc[self.df[criteria] > self.short_entry_threshold, price+'_Position_short'] = 1
-            elif self.short_entry_sign == '<':
-                self.df.loc[self.df[criteria] < self.short_entry_threshold, price+'_Position_short'] = 1
-            else:
-                print('error in short entry sign')
-            
-            if self.short_exit_sign == '>':
-                self.df.loc[self.df[criteria] > self.short_exit_threshold, price+'_Position_short'] = 0
-            elif self.short_exit_sign == '<':
-                self.df.loc[self.df[criteria] < self.short_exit_threshold, price+'_Position_short'] = 0
-            else:
-                print('error in short exit sign')
+        elif self.long_entry_sign == '<':
+            df_long_entry = (tdf.criteria_df < self.long_entry_threshold) + 0
+        
+        if self.long_exit_sign == '>':
+            df_long_exit = (tdf.criteria_df > self.long_exit_threshold) * -1 + 1        # Reverse 1 and 0
 
-            self.price_position_pair[price] = [price+'_Position_long', price+'_Position_short']
+        elif self.long_exit_sign == '<':
+            df_long_exit = (tdf.criteria_df < self.long_exit_threshold) * -1 + 1
+        
+        df_long_entry = df_long_entry.replace(0, np.nan)
+        df_long_exit = df_long_exit.replace(1, np.nan)
 
-        self.df.fillna(method='ffill', inplace=True)
-        self.df.fillna(0, inplace=True)
+        df_position_long = df_long_entry.combine_first(df_long_exit)
+        df_position_long.fillna(method='ffill', inplace=True)
+        df_position_long.fillna(0, inplace=True)
+
+        # Position short df
+        if self.short_entry_sign == '>':
+            df_short_entry = (tdf.criteria_df > self.short_entry_threshold) + 0
+
+        elif self.short_entry_sign == '<':
+            df_short_entry = (tdf.criteria_df < self.short_entry_threshold) + 0
+        
+        if self.short_exit_sign == '>':
+            df_short_exit = (tdf.criteria_df > self.short_exit_threshold) * -1 + 1
+
+        elif self.short_exit_sign == '<':
+            df_short_exit = (tdf.criteria_df < self.short_exit_threshold) * -1 + 1
+        
+        df_short_entry = df_short_entry.replace(0, np.nan)
+        df_short_exit = df_short_exit.replace(1, np.nan)
+
+        df_position_short = df_short_entry.combine_first(df_short_exit)
+        df_position_short.fillna(method='ffill', inplace=True)
+        df_position_short.fillna(0, inplace=True)
+
+        # Save position df
+        df_position_long.columns = tdf.returns.columns + '_pos_long'
+        df_position_short.columns = tdf.returns.columns + '_pos_short'
+
+        self.position_long = df_position_long
+        self.position_short = df_position_short
+        
         print('Strategy applied!')
 
     def backtest(self, tdf, trading_fee=0, check_long=False, check_short=False, check_overall=True, plot=True):
 
         # Shift daily returns column up 1 row to calculate P&L
-        for price in tdf.price_criteria_pair.keys():
-            self.df[price+'_pct_change_next_day'] = self.df[price+'_pct_change'].shift(-1)
+        returns_next_day = tdf.returns.shift(-1).copy()
+        returns_next_day.columns = tdf.returns.columns + '_next_day'
 
-        self.df = self.df.iloc[1:-1,:]
+        # Merge returns and positions together
+        self.df = pd.merge(tdf.returns, returns_next_day, left_index=True, right_index=True)
+        self.df = pd.merge(self.df, self.position_long, left_index=True, right_index=True)
+        self.df = pd.merge(self.df, self.position_short, left_index=True, right_index=True)
 
         # Add P&L columns 
-        self.df['daily p&l'] = self.df.apply(self._calculate_daily_pl, axis=1)
+        self.df['daily p&l'] = (returns_next_day.values * (self.position_long.values - self.position_short.values)).sum(axis=1)
+        self.df = self.df.iloc[1:-1,:]
         self.df['cum p&l'] = (1 + self.df['daily p&l']).cumprod() - 1
 
         # Other trade metrics
-        self.no_of_trades = abs(self.df['Open_Position_long'].astype(int) - self.df['Open_Position_long'].shift().fillna(0).astype(int)).sum()//2
+        self.no_of_trades = int((abs(self.position_long.diff()).sum()//2).sum() + (abs(self.position_short.diff()).sum()//2).sum())
         self.sharpe_ratio = np.sqrt(len(self.df)) * np.mean(self.df['daily p&l']) / np.std(self.df['daily p&l'])
-        self.max_dd = self._calculate_maxdd(tdf, window=len(self.df))
-        #self.max_dd = (self.df['cum p&l'].rolling(len(self.df), min_periods=1).max() - self.df['cum p&l'].rolling(len(self.df), min_periods=1).min()).max()
+        self.max_dd = self._calculate_maxdd(self.df)
 
         print(f'# of trades: {self.no_of_trades}')
         print(f'Sharpe ratio: {round(self.sharpe_ratio,2)}')
-        print(f'Max Drawdown: {self.max_dd}')
+        print(f'Max Drawdown: {round(self.max_dd * 100,2)}%')
 
         if plot:
             plt.xticks(rotation=45)
