@@ -3,14 +3,11 @@ import numpy as np
 from datetime import datetime
 
 class TradingDataFrame():
-    def __init__(self, df, time_col, price_criteria_pair=None, price_cols=[], time_unit=None):
+    def __init__(self, input_df, time_col, price_cols=[], time_unit=None):
         
         self.time_col = time_col
-        self.price_criteria_pair = price_criteria_pair
         self.price_cols = price_cols
-
-        if len(price_cols) == 0:
-            self.price_cols = [price for price in price_criteria_pair.keys()]
+        df = input_df.copy()
 
         # Set time col to index
         if time_unit != None:
@@ -26,7 +23,7 @@ class TradingDataFrame():
 
         df_plusone = df.copy() + 1
         log_data = np.log(df_plusone)
-        log_returns = log_data[price_cols].pct_change()
+        log_returns = log_data[price_cols].diff()
 
         # Drop first row
         returns = returns.iloc[1:,:].copy()
@@ -36,3 +33,9 @@ class TradingDataFrame():
         self.log_data = log_data
         self.returns = returns
         self.log_returns = log_returns
+    
+    def set_criteria_df(self, df):
+        if (abs(df.shape[0] - self.data.shape[0]) > 5) & (abs(df.shape[1] - self.data.shape[1]) > 5):
+            print(f'df shape does not match (data: {self.data.shape}, criteria: {df.shape}), please check.')
+        else:
+            self.criteria_df = df
