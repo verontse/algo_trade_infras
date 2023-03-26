@@ -18,14 +18,27 @@ class Strategy():
         Max_Daily_Drawdown = Daily_Drawdown.cummin()
         return min(Max_Daily_Drawdown)
 
-    def set_strategy(self, long_entry=None, long_exit=None, short_entry=None, short_exit=None):
+    def set_strategy(self, long_entry=None, long_exit=None, short_entry=None, short_exit=None, force_exit=None):
         self.long_entry_sign, self.long_entry_threshold = long_entry
         self.long_exit_sign, self.long_exit_threshold = long_exit
         self.short_entry_sign, self.short_entry_threshold = short_entry
         self.short_exit_sign, self.short_exit_threshold = short_exit
+        self.force_exit = force_exit
 
     def _apply_strategy(self, tdf):
-        
+
+        # Data prep
+        if type(self.long_entry_threshold) == pd.DataFrame:
+            self.long_entry_threshold.columns = tdf.criteria_df.columns
+            self.long_exit_threshold.columns = tdf.criteria_df.columns
+            self.short_entry_threshold.columns = tdf.criteria_df.columns
+            self.short_exit_threshold.columns = tdf.criteria_df.columns
+
+            self.long_entry_threshold.index = tdf.criteria_df.index
+            self.long_exit_threshold.index = tdf.criteria_df.index
+            self.short_entry_threshold.index = tdf.criteria_df.index
+            self.short_exit_threshold.index = tdf.criteria_df.index
+
         # Position long df
         if self.long_entry_sign == '>':
             df_long_entry = (tdf.criteria_df > self.long_entry_threshold) + 0
@@ -43,6 +56,13 @@ class Strategy():
         df_long_exit = df_long_exit.replace(1, np.nan)
 
         df_position_long = df_long_entry.combine_first(df_long_exit)
+        df_position_long.columns = tdf.log_returns.columns + '_pos_long'
+        
+        if self.force_exit=='daily':
+            df_position_long.loc[(df_position_long.index.hour==0)&\
+                                 (df_position_long.index.minute==0)&\
+                                 (df_position_long.index.second==0), tdf.log_returns.columns + '_pos_long'] = 0
+            
         df_position_long.fillna(method='ffill', inplace=True)
         df_position_long.fillna(0, inplace=True)
 
@@ -63,15 +83,20 @@ class Strategy():
         df_short_exit = df_short_exit.replace(1, np.nan)
 
         df_position_short = df_short_entry.combine_first(df_short_exit)
+        df_position_short.columns = tdf.log_returns.columns + '_pos_short'
+
+        if self.force_exit=='daily':
+            df_position_short.loc[(df_position_short.index.hour==0)&\
+                                 (df_position_short.index.minute==0)&\
+                                 (df_position_short.index.second==0), tdf.log_returns.columns + '_pos_short'] = 0
+
         df_position_short.fillna(method='ffill', inplace=True)
         df_position_short.fillna(0, inplace=True)
 
         # Save position df
-        df_position_long.columns = tdf.log_returns.columns + '_pos_long'
-        df_position_short.columns = tdf.log_returns.columns + '_pos_short'
 
-        self.position_long = df_position_long
-        self.position_short = df_position_short
+        self.position_long = df_position_long.iloc[1:, :]
+        self.position_short = df_position_short.iloc[1:, :]
         
         print('Strategy applied!')
 
