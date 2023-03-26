@@ -35,7 +35,7 @@ class TradingDataFrame():
         self.log_returns = log_returns
     
     def set_criteria_df(self, df):
-        if (abs(df.shape[0] - self.data.shape[0]) > 5) & (abs(df.shape[1] - self.data.shape[1]) > 5):
+        if df.shape != self.data.shape:
             print(f'df shape does not match (data: {self.data.shape}, criteria: {df.shape}), please check.')
         else:
             self.criteria_df = df
