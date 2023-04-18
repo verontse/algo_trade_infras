@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import seaborn as sn
+from scipy.stats import norm, t
+import statsmodels.api as sm
 from datetime import datetime
 
 class TradingDataFrame():
@@ -39,3 +42,34 @@ class TradingDataFrame():
             print(f'df shape does not match (data: {self.data.shape}, criteria: {df.shape}), please check.')
         else:
             self.criteria_df = df
+
+    def fit_pdf(self, col='Close_BTC', data='log_returns', distribution='normal'):
+
+        # Choose data
+        if data == 'log_returns':
+            price_series = self.log_returns[col]
+        elif data == 'returns':
+            price_series = self.returns[col]
+        
+        # Choose distribution
+        if distribution == 'normal':
+            loc, scale = norm.fit(price_series)
+        elif distribution == 't':
+            s, loc, scale = t.fit(price_series)     
+
+        ax = sn.histplot(price_series, stat='density')
+        x0, x1 = ax.get_xlim()  # extract the endpoints for the x-axis
+        x_pdf = np.linspace(x0, x1, 100)
+        y_pdf = norm.pdf(x_pdf, loc=loc, scale=scale)
+
+        return ax.plot(x_pdf, y_pdf, 'r', lw=2, label='pdf')
+    
+    def qqplot(self, col='Close_BTC', data='log_returns'):
+
+        # Choose data
+        if data == 'log_returns':
+            price_series = self.log_returns[col]
+        elif data == 'returns':
+            price_series = self.returns[col]
+
+        return sm.qqplot(price_series, line='45')
